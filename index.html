@@ -1,1332 +1,363 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  CheckCircle2, Circle, Plus, Trash2, Edit3, Check, X, 
-  ChevronLeft, ChevronRight, Calendar, Bell, BellOff, 
-  Share2, Users, LogIn, LogOut, Smartphone, Download, 
-  Sparkles, AlertCircle, Copy, RefreshCw, UserPlus, CheckSquare
-} from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, GoogleAuthProvider, signInWithPopup, 
-  signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut 
-} from 'firebase/auth';
-import { 
-  getFirestore, doc, setDoc, getDoc, onSnapshot, 
-  collection, updateDoc, arrayUnion, arrayRemove 
-} from 'firebase/firestore';
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="週間目標" />
+  <title>週間目標＆反省</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen pb-20">
+  <div id="app" class="max-w-lg mx-auto px-4 pt-5"></div>
 
-// --- Firebase 初期化 ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : {
-      apiKey: "demo-api-key",
-      authDomain: "demo-project.firebaseapp.com",
-      projectId: "demo-project",
-      storageBucket: "demo-project.appspot.com",
-      messagingSenderId: "123456789",
-      appId: "1:123456789:web:abcdef"
-    };
-
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'weekly-goal-tracker-app';
-
-let app, auth, db;
-try {
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-} catch (error) {
-  console.error("Firebase initialization error:", error);
-}
-
-// --- 日付・週計算ユーティリティ（日曜日始まり〜土曜日終わり） ---
-function getSundayOfWeek(date) {
-  const d = new Date(date);
-  const day = d.getDay(); // 0 (日) 〜 6 (土)
-  d.setDate(d.getDate() - day);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function getSaturdayOfWeek(sundayDate) {
-  const d = new Date(sundayDate);
-  d.setDate(d.getDate() + 6);
-  d.setHours(23, 59, 59, 999);
-  return d;
-}
-
-function formatWeekId(sundayDate) {
-  const y = sundayDate.getFullYear();
-  const m = String(sundayDate.getMonth() + 1).padStart(2, '0');
-  const d = String(sundayDate.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function formatJapaneseWeekRange(sundayDate) {
-  const sat = getSaturdayOfWeek(sundayDate);
-  const startYear = sundayDate.getFullYear();
-  const startMonth = sundayDate.getMonth() + 1;
-  const startDay = sundayDate.getDate();
-  const endMonth = sat.getMonth() + 1;
-  const endDay = sat.getDate();
-
-  if (sundayDate.getFullYear() !== sat.getFullYear()) {
-    return `${startYear}年${startMonth}月${startDay}日(日) 〜 ${sat.getFullYear()}年${endMonth}月${endDay}日(土)`;
-  }
-  return `${startYear}年${startMonth}月${startDay}日(日) 〜 ${endMonth}月${endDay}日(土)`;
-}
-
-// --- 動的PWA Manifest & アイコン生成 ---
-function setupDynamicPWA() {
-  try {
-    // SVGからPNG DataURLを生成してアイコン化
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      // 背景グラデーション
-      const grad = ctx.createLinearGradient(0, 0, 512, 512);
-      grad.addColorStop(0, '#4f46e5'); // Indigo 600
-      grad.addColorStop(1, '#10b981'); // Emerald 500
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.roundRect(0, 0, 512, 512, 112);
-      ctx.fill();
-
-      // チェックマーク描画
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 44;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(145, 265);
-      ctx.lineTo(220, 340);
-      ctx.lineTo(375, 175);
-      ctx.stroke();
-
-      const iconDataUrl = canvas.toDataURL('image/png');
-
-      // Apple Touch Icon 設定
-      let appleIcon = document.querySelector("link[rel='apple-touch-icon']");
-      if (!appleIcon) {
-        appleIcon = document.createElement('link');
+  <script>
+    // アイコンとマニフェストの動的生成（ホーム画面追加対応）
+    (function setupPWA() {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        const grad = ctx.createLinearGradient(0, 0, 512, 512);
+        grad.addColorStop(0, '#4f46e5');
+        grad.addColorStop(1, '#10b981');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(0, 0, 512, 512, 112);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 44;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(145, 265); ctx.lineTo(220, 340); ctx.lineTo(375, 175);
+        ctx.stroke();
+        const iconUrl = canvas.toDataURL('image/png');
+        const appleIcon = document.createElement('link');
         appleIcon.rel = 'apple-touch-icon';
+        appleIcon.href = iconUrl;
         document.head.appendChild(appleIcon);
-      }
-      appleIcon.href = iconDataUrl;
 
-      // Web App Manifest 設定
-      const manifest = {
-        name: "週間目標＆反省トラッカー",
-        short_name: "週間目標",
-        description: "毎週の目標管理と反省の記録、土曜日9時の未達リマインド通知アプリ",
-        start_url: window.location.href,
-        display: "standalone",
-        background_color: "#f8fafc",
-        theme_color: "#4f46e5",
-        icons: [
-          {
-            src: iconDataUrl,
-            sizes: "512x512",
-            type: "image/png",
-            purpose: "any maskable"
-          }
-        ]
-      };
-
-      const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
-      const manifestUrl = URL.createObjectURL(manifestBlob);
-
-      let manifestLink = document.querySelector("link[rel='manifest']");
-      if (!manifestLink) {
-        manifestLink = document.createElement('link');
+        const manifest = {
+          name: "週間目標＆反省",
+          short_name: "週間目標",
+          start_url: window.location.href,
+          display: "standalone",
+          background_color: "#f8fafc",
+          theme_color: "#4f46e5",
+          icons: [{ src: iconUrl, sizes: "512x512", type: "image/png" }]
+        };
+        const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+        const manifestLink = document.createElement('link');
         manifestLink.rel = 'manifest';
+        manifestLink.href = URL.createObjectURL(blob);
         document.head.appendChild(manifestLink);
-      }
-      manifestLink.href = manifestUrl;
+      } catch (e) {}
+    })();
+
+    // 日付計算（日曜始まり〜土曜終わり）
+    function getSundayOfWeek(date) {
+      const d = new Date(date);
+      d.setDate(d.getDate() - d.getDay());
+      d.setHours(0, 0, 0, 0);
+      return d;
     }
-  } catch (e) {
-    console.warn("PWA manifest generation skipped:", e);
-  }
-}
+    function formatWeekId(sunday) {
+      const y = sunday.getFullYear();
+      const m = String(sunday.getMonth() + 1).padStart(2, '0');
+      const d = String(sunday.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    function formatWeekRange(sunday) {
+      const sat = new Date(sunday);
+      sat.setDate(sat.getDate() + 6);
+      return `${sunday.getFullYear()}年${sunday.getMonth() + 1}月${sunday.getDate()}日(日) 〜 ${sat.getMonth() + 1}月${sat.getDate()}日(土)`;
+    }
 
-export default function App() {
-  // --- 認証・ユーザー状態 ---
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [authError, setAuthError] = useState('');
-
-  // --- ワークスペース（自分 or 共有ボード）状態 ---
-  // activeBoardId: 'guest' | user.uid | 共有相手のuid/boardId
-  const [activeBoardId, setActiveBoardId] = useState('guest');
-  const [boardMeta, setBoardMeta] = useState({
-    ownerId: 'guest',
-    ownerName: 'ゲスト（ローカル保存）',
-    ownerEmail: '',
-    sharedWithEmails: [],
-    members: []
-  });
-  // 自分がアクセス可能な共有ボード一覧 [{ boardId, ownerName, ownerEmail }]
-  const [joinedBoards, setJoinedBoards] = useState([]);
-
-  // --- 週切り替え状態 ---
-  const [currentSunday, setCurrentSunday] = useState(() => getSundayOfWeek(new Date()));
-  const weekId = useMemo(() => formatWeekId(currentSunday), [currentSunday]);
-  const isThisWeek = useMemo(() => {
-    return formatWeekId(getSundayOfWeek(new Date())) === weekId;
-  }, [weekId]);
-
-  // --- 週間データ（目標リスト＆反省） ---
-  const [goals, setGoals] = useState([]);
-  const [reflection, setReflection] = useState('');
-  const [newGoalText, setNewGoalText] = useState('');
-  const [editingGoalId, setEditingGoalId] = useState(null);
-  const [editingGoalText, setEditingGoalText] = useState('');
-  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'error'
-
-  // --- 通知機能状態 ---
-  const [notifyEnabled, setNotifyEnabled] = useState(false);
-  const [notifyPermission, setNotifyPermission] = useState(
-    typeof Notification !== 'undefined' ? Notification.permission : 'default'
-  );
-  const [inAppAlert, setInAppAlert] = useState(null);
-  const lastNotifiedWeekRef = useRef('');
-
-  // --- モーダル状態 ---
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [shareEmailInput, setShareEmailInput] = useState('');
-  const [joinBoardIdInput, setJoinBoardIdInput] = useState('');
-  const [shareMessage, setShareMessage] = useState({ type: '', text: '' });
-
-  const [showPwaModal, setShowPwaModal] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
-
-  // --- 1. 初期セットアップ（PWA & 認証） ---
-  useEffect(() => {
-    setupDynamicPWA();
-
-    // Android Chrome等のインストールプロンプト捕捉
-    const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
+    // 状態管理（iPhone本体に自動保存）
+    const STORAGE_KEY = 'weekly_goals_app_v1';
+    let state = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') || {
+      weeks: {},
+      notifyEnabled: false,
+      lastNotifiedWeek: ''
     };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    let currentSunday = getSundayOfWeek(new Date());
+    let bannerAlert = null;
+    let showShareModal = false;
+    let showHelpModal = false;
 
-    // 通知設定の復元
-    try {
-      const savedNotify = window.name === 'notify_on';
-      if (savedNotify && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        setNotifyEnabled(true);
+    // URLハッシュ経由の共有データ読み込み（Googleアカウント等でリンク共有）
+    (function loadSharedFromUrl() {
+      if (window.location.hash.startsWith('#share=')) {
+        try {
+          const encoded = decodeURIComponent(window.location.hash.slice(7));
+          const sharedData = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+          if (sharedData && sharedData.weekId && sharedData.data) {
+            state.weeks[sharedData.weekId] = sharedData.data;
+            saveState();
+            const parts = sharedData.weekId.split('-').map(Number);
+            currentSunday = new Date(parts[0], parts[1] - 1, parts[2]);
+            history.replaceState(null, '', window.location.pathname);
+            bannerAlert = { title: '共有データを読み込みました', body: `${formatWeekRange(currentSunday)} の目標と反省を取り込みました。` };
+          }
+        } catch (e) {}
       }
-    } catch (_) {}
+    })();
 
-    // Firebase Auth 監視
-    if (!auth) {
-      setAuthLoading(false);
-      return;
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     }
 
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        }
-      } catch (err) {
-        console.warn("Custom token auth failed, waiting for user action:", err);
+    function getWeekData(weekId) {
+      if (!state.weeks[weekId]) {
+        const isCurrent = weekId === formatWeekId(getSundayOfWeek(new Date()));
+        state.weeks[weekId] = {
+          goals: isCurrent ? [
+            { id: '1', text: '毎日30分勉強または読書をする', completed: false },
+            { id: '2', text: '週末に部屋の片付けをする', completed: false }
+          ] : [],
+          reflection: ''
+        };
       }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser && !currentUser.isAnonymous) {
-        setUser(currentUser);
-        setActiveBoardId(currentUser.uid);
-        // ユーザープロフィール＆ボードメタデータ初期化
-        await ensureUserBoardInitialized(currentUser);
-      } else {
-        setUser(null);
-        setActiveBoardId('guest');
-      }
-      setAuthLoading(false);
-    });
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      unsubscribe();
-    };
-  }, []);
-
-  // --- ユーザーボード初期作成 ---
-  const ensureUserBoardInitialized = async (currentUser) => {
-    if (!db || !currentUser) return;
-    try {
-      const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'boards', currentUser.uid);
-      const snap = await getDoc(metaRef);
-      const memberObj = {
-        uid: currentUser.uid,
-        name: currentUser.displayName || 'Googleユーザー',
-        email: currentUser.email || '',
-        photoURL: currentUser.photoURL || ''
-      };
-
-      if (!snap.exists()) {
-        await setDoc(metaRef, {
-          ownerId: currentUser.uid,
-          ownerName: memberObj.name,
-          ownerEmail: memberObj.email,
-          sharedWithEmails: currentUser.email ? [currentUser.email.toLowerCase()] : [],
-          members: [memberObj],
-          updatedAt: Date.now()
-        });
-      } else {
-        // メンバー情報更新
-        const data = snap.data();
-        const exists = (data.members || []).some(m => m.uid === currentUser.uid);
-        if (!exists) {
-          await updateDoc(metaRef, {
-            members: arrayUnion(memberObj)
-          });
-        }
-      }
-
-      // ユーザー自身の参加ボードリスト取得
-      const userProfileRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'info');
-      const profileSnap = await getDoc(userProfileRef);
-      if (profileSnap.exists()) {
-        setJoinedBoards(profileSnap.data().joinedBoards || []);
-      } else {
-        await setDoc(userProfileRef, {
-          email: currentUser.email || '',
-          displayName: currentUser.displayName || '',
-          joinedBoards: []
-        });
-      }
-    } catch (err) {
-      console.error("Error initializing user board:", err);
-    }
-  };
-
-  // --- 2. ボードメタ情報＆週間データのリアルタイム購読 ---
-  // ゲスト用インメモリキャッシュ（Firebase未接続・未ログイン時）
-  const guestStoreRef = useRef({});
-
-  useEffect(() => {
-    if (authLoading) return;
-
-    // ゲストモード（未ログイン）の場合
-    if (!user || activeBoardId === 'guest' || !db) {
-      setBoardMeta({
-        ownerId: 'guest',
-        ownerName: 'ゲストモード（お試し利用中）',
-        ownerEmail: 'Googleログインでクラウド保存＆共有が可能',
-        sharedWithEmails: [],
-        members: []
-      });
-      const cached = guestStoreRef.current[weekId] || {
-        goals: isThisWeek ? [
-          { id: 'sample-1', text: '毎日30分読書をする', completed: true },
-          { id: 'sample-2', text: '週3回ランニングまたはストレッチ', completed: false },
-          { id: 'sample-3', text: '週末に部屋の片付けをする', completed: false }
-        ] : [],
-        reflection: ''
-      };
-      setGoals(cached.goals);
-      setReflection(cached.reflection);
-      return;
+      return state.weeks[weekId];
     }
 
-    // ログイン済み：ボードメタデータの購読
-    const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'boards', activeBoardId);
-    const unsubMeta = onSnapshot(metaRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setBoardMeta(docSnap.data());
-      }
-    }, (err) => {
-      console.error("Board meta snapshot error:", err);
-    });
+    // 土曜日 午前9:00 未達リマインド通知チェック
+    function triggerNotification(isTest = false) {
+      const thisWeekId = formatWeekId(getSundayOfWeek(new Date()));
+      const data = getWeekData(thisWeekId);
+      const uncompleted = data.goals.filter(g => !g.completed);
 
-    // ログイン済み：該当週データの購読
-    const weekDocRef = doc(db, 'artifacts', appId, 'public', 'data', `board_${activeBoardId}_weeks`, weekId);
-    const unsubWeek = onSnapshot(weekDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setGoals(data.goals || []);
-        setReflection(data.reflection || '');
-      } else {
-        setGoals([]);
-        setReflection('');
-      }
-      setSaveStatus('saved');
-    }, (err) => {
-      console.error("Week data snapshot error:", err);
-      setSaveStatus('error');
-    });
+      if (!isTest && uncompleted.length === 0) return;
 
-    return () => {
-      unsubMeta();
-      unsubWeek();
-    };
-  }, [user, activeBoardId, weekId, authLoading, isThisWeek]);
+      const title = isTest ? '【テスト通知】土曜日 9:00 未達リマインド' : '週間目標のリマインド（土曜日 9:00）';
+      const body = uncompleted.length > 0
+        ? `今週の目標が残り ${uncompleted.length} 件未達です！（例：「${uncompleted[0].text}」）今日が最終日です！`
+        : '今週の目標はすべて達成されています！素晴らしい1週間ですね！';
 
-  // --- データ保存ヘルパー ---
-  const persistWeekData = async (updatedGoals, updatedReflection) => {
-    setSaveStatus('saving');
+      bannerAlert = { title, body };
+      render();
 
-    // ゲストモード
-    if (!user || activeBoardId === 'guest' || !db) {
-      guestStoreRef.current[weekId] = {
-        goals: updatedGoals,
-        reflection: updatedReflection
-      };
-      setTimeout(() => setSaveStatus('saved'), 250);
-      return;
-    }
-
-    // Firestore保存
-    try {
-      const weekDocRef = doc(db, 'artifacts', appId, 'public', 'data', `board_${activeBoardId}_weeks`, weekId);
-      await setDoc(weekDocRef, {
-        weekId,
-        goals: updatedGoals,
-        reflection: updatedReflection,
-        updatedAt: Date.now(),
-        updatedBy: user.email || user.uid
-      }, { merge: true });
-      setSaveStatus('saved');
-    } catch (err) {
-      console.error("Save error:", err);
-      setSaveStatus('error');
-    }
-  };
-
-  // --- 3. 目標 CRUD 操作 ---
-  const handleAddGoal = (e) => {
-    e.preventDefault();
-    const trimmed = newGoalText.trim();
-    if (!trimmed) return;
-
-    const newItem = {
-      id: `goal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      text: trimmed,
-      completed: false,
-      createdAt: Date.now()
-    };
-    const nextGoals = [...goals, newItem];
-    setGoals(nextGoals);
-    setNewGoalText('');
-    persistWeekData(nextGoals, reflection);
-  };
-
-  const handleToggleGoal = (id) => {
-    const nextGoals = goals.map(g => 
-      g.id === id ? { ...g, completed: !g.completed } : g
-    );
-    setGoals(nextGoals);
-    persistWeekData(nextGoals, reflection);
-  };
-
-  const handleDeleteGoal = (id) => {
-    const nextGoals = goals.filter(g => g.id !== id);
-    setGoals(nextGoals);
-    persistWeekData(nextGoals, reflection);
-  };
-
-  const startEditingGoal = (goal) => {
-    setEditingGoalId(goal.id);
-    setEditingGoalText(goal.text);
-  };
-
-  const saveEditedGoal = (id) => {
-    const trimmed = editingGoalText.trim();
-    if (!trimmed) {
-      setEditingGoalId(null);
-      return;
-    }
-    const nextGoals = goals.map(g => 
-      g.id === id ? { ...g, text: trimmed } : g
-    );
-    setGoals(nextGoals);
-    setEditingGoalId(null);
-    persistWeekData(nextGoals, reflection);
-  };
-
-  // --- 反省テキスト変更（デバウンス自動保存） ---
-  const reflectionTimerRef = useRef(null);
-  const handleReflectionChange = (e) => {
-    const val = e.target.value;
-    setReflection(val);
-    setSaveStatus('saving');
-
-    if (reflectionTimerRef.current) clearTimeout(reflectionTimerRef.current);
-    reflectionTimerRef.current = setTimeout(() => {
-      persistWeekData(goals, val);
-    }, 600);
-  };
-
-  // --- 達成率計算 ---
-  const totalGoals = goals.length;
-  const completedGoals = goals.filter(g => g.completed).length;
-  const uncompletedGoals = goals.filter(g => !g.completed);
-  const progressPercent = totalGoals === 0 ? 0 : Math.round((completedGoals / totalGoals) * 100);
-
-  // --- 4. 土曜日 午前9:00 未達リマインド通知ロジック ---
-  const triggerSaturdayNotification = (isTest = false) => {
-    const thisWeekId = formatWeekId(getSundayOfWeek(new Date()));
-    const targetUncompleted = isTest && uncompletedGoals.length === 0
-      ? [{ text: '（テスト）サンプル未達目標' }]
-      : uncompletedGoals;
-
-    if (!isTest && targetUncompleted.length === 0) return;
-
-    const title = isTest 
-      ? '【テスト通知】土曜日 9:00 の未達リマインド' 
-      : '⏰ 週間目標のリマインド（土曜日 9:00）';
-    const body = targetUncompleted.length > 0
-      ? `今週の目標が残り ${targetUncompleted.length} 件未達です！（例:「${targetUncompleted[0].text}」）今日が最終日です！`
-      : '今週の目標はすべて達成されています！素晴らしい1週間ですね！';
-
-    // アプリ内バナー表示
-    setInAppAlert({ title, body, isTest });
-
-    // Web Notification API
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      try {
-        new Notification(title, {
-          body,
-          tag: `weekly-reminder-${thisWeekId}`,
-          requireInteraction: true
-        });
-      } catch (err) {
-        console.warn("Notification display failed:", err);
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try { new Notification(title, { body }); } catch (e) {}
       }
     }
-  };
 
-  const handleToggleNotify = async () => {
-    if (!notifyEnabled) {
-      if (typeof Notification === 'undefined') {
-        setInAppAlert({
-          title: '通知非対応ブラウザ',
-          body: 'お使いのブラウザはデスクトップ通知に対応していません。アプリ内バナーでお知らせします。',
-          isTest: false
-        });
-        setNotifyEnabled(true);
-        return;
-      }
-
-      if (Notification.permission === 'granted') {
-        setNotifyEnabled(true);
-        setNotifyPermission('granted');
-        window.name = 'notify_on';
-      } else if (Notification.permission !== 'denied') {
-        const perm = await Notification.requestPermission();
-        setNotifyPermission(perm);
-        if (perm === 'granted') {
-          setNotifyEnabled(true);
-          window.name = 'notify_on';
-        } else {
-          setInAppAlert({
-            title: '通知がブロックされています',
-            body: 'ブラウザのアドレスバー付近の設定から通知を許可してください。',
-            isTest: false
-          });
-        }
-      } else {
-        setInAppAlert({
-          title: '通知が許可されていません',
-          body: '端末またはブラウザの設定からこのサイトの通知をオンにしてください。',
-          isTest: false
-        });
-      }
-    } else {
-      setNotifyEnabled(false);
-      window.name = '';
-    }
-  };
-
-  // 定期チェック（毎分チェックして土曜日9:00以降かつ未達があれば通知）
-  useEffect(() => {
-    if (!notifyEnabled) return;
-
-    const checkSchedule = () => {
+    setInterval(() => {
+      if (!state.notifyEnabled) return;
       const now = new Date();
-      const dayOfWeek = now.getDay(); // 6 = 土曜日
-      const hours = now.getHours();
-      const currentThisWeekId = formatWeekId(getSundayOfWeek(now));
+      const thisWeekId = formatWeekId(getSundayOfWeek(now));
+      // 土曜日(6)の午前9時以降で、今週まだ通知していない場合
+      if (now.getDay() === 6 && now.getHours() >= 9 && state.lastNotifiedWeek !== thisWeekId) {
+        const uncompleted = getWeekData(thisWeekId).goals.filter(g => !g.completed);
+        if (uncompleted.length > 0) {
+          state.lastNotifiedWeek = thisWeekId;
+          saveState();
+          triggerNotification(false);
+        }
+      }
+    }, 30000);
 
-      // 土曜日(6)の午前9時以降、その週でまだ通知しておらず、今週表示中で未達がある場合
-      if (
-        dayOfWeek === 6 &&
-        hours >= 9 &&
-        isThisWeek &&
-        uncompletedGoals.length > 0 &&
-        lastNotifiedWeekRef.current !== currentThisWeekId
-      ) {
-        lastNotifiedWeekRef.current = currentThisWeekId;
-        triggerSaturdayNotification(false);
+    // 操作関数
+    window.changeWeek = (offset) => {
+      currentSunday.setDate(currentSunday.getDate() + offset * 7);
+      render();
+    };
+    window.goToday = () => {
+      currentSunday = getSundayOfWeek(new Date());
+      render();
+    };
+    window.addGoal = (e) => {
+      e.preventDefault();
+      const input = document.getElementById('newGoalInput');
+      const text = input.value.trim();
+      if (!text) return;
+      const weekId = formatWeekId(currentSunday);
+      getWeekData(weekId).goals.push({ id: String(Date.now()), text, completed: false });
+      saveState();
+      render();
+    };
+    window.toggleGoal = (id) => {
+      const weekId = formatWeekId(currentSunday);
+      const goal = getWeekData(weekId).goals.find(g => g.id === id);
+      if (goal) goal.completed = !goal.completed;
+      saveState();
+      render();
+    };
+    window.deleteGoal = (id) => {
+      const weekId = formatWeekId(currentSunday);
+      const data = getWeekData(weekId);
+      data.goals = data.goals.filter(g => g.id !== id);
+      saveState();
+      render();
+    };
+    window.updateReflection = (val) => {
+      const weekId = formatWeekId(currentSunday);
+      getWeekData(weekId).reflection = val;
+      saveState();
+    };
+    window.toggleNotify = async () => {
+      if (!state.notifyEnabled) {
+        if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+          await Notification.requestPermission();
+        }
+        state.notifyEnabled = true;
+      } else {
+        state.notifyEnabled = false;
+      }
+      saveState();
+      render();
+    };
+    window.testNotify = () => triggerNotification(true);
+    window.closeBanner = () => { bannerAlert = null; render(); };
+    window.toggleShare = (v) => { showShareModal = v; render(); };
+    window.toggleHelp = (v) => { showHelpModal = v; render(); };
+
+    window.copyShareLink = () => {
+      const weekId = formatWeekId(currentSunday);
+      const payload = { weekId, data: getWeekData(weekId) };
+      const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      const url = `${window.location.origin}${window.location.pathname}#share=${encodeURIComponent(encoded)}`;
+      if (navigator.share) {
+        navigator.share({ title: '週間目標の共有', text: `${formatWeekRange(currentSunday)}の目標`, url }).catch(() => {});
+      } else {
+        navigator.clipboard.writeText(url);
+        alert('共有リンクをコピーしました！LINEやGmailで送れます。');
       }
     };
 
-    checkSchedule();
-    const interval = setInterval(checkSchedule, 30000); // 30秒ごとにチェック
-    return () => clearInterval(interval);
-  }, [notifyEnabled, isThisWeek, uncompletedGoals]);
+    // 画面描画
+    function render() {
+      const weekId = formatWeekId(currentSunday);
+      const isThisWeek = weekId === formatWeekId(getSundayOfWeek(new Date()));
+      const data = getWeekData(weekId);
+      const total = data.goals.length;
+      const done = data.goals.filter(g => g.completed).length;
+      const percent = total === 0 ? 0 : Math.round((done / total) * 100);
 
-  // --- 5. Googleログイン / ログアウト ---
-  const handleGoogleLogin = async () => {
-    setAuthError('');
-    if (!auth) {
-      setAuthError('Firebase設定が見つかりません。');
-      return;
-    }
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      await signInWithPopup(auth, provider);
-    } catch (err) {
-      console.error("Google sign-in error:", err);
-      setAuthError('Googleログインに失敗しました。ポップアップブロック等をご確認ください。');
-    }
-  };
-
-  const handleLogout = async () => {
-    if (!auth) return;
-    try {
-      await signOut(auth);
-      setUser(null);
-      setActiveBoardId('guest');
-    } catch (err) {
-      console.error("Sign out error:", err);
-    }
-  };
-
-  // --- 6. 共有機能（メールアドレス追加 & ルームID参加） ---
-  const handleInviteByEmail = async (e) => {
-    e.preventDefault();
-    setShareMessage({ type: '', text: '' });
-    const email = shareEmailInput.trim().toLowerCase();
-    if (!email || !email.includes('@')) {
-      setShareMessage({ type: 'error', text: '有効なGoogleメールアドレスを入力してください。' });
-      return;
-    }
-    if (!user || !db) {
-      setShareMessage({ type: 'error', text: '共有するには先にGoogleログインしてください。' });
-      return;
-    }
-
-    try {
-      const metaRef = doc(db, 'artifacts', appId, 'public', 'data', 'boards', user.uid);
-      await updateDoc(metaRef, {
-        sharedWithEmails: arrayUnion(email)
-      });
-      setShareEmailInput('');
-      setShareMessage({ 
-        type: 'success', 
-        text: `${email} を共有許可リストに追加しました！下の「共有ID」を相手に伝えてください。` 
-      });
-    } catch (err) {
-      console.error("Invite error:", err);
-      setShareMessage({ type: 'error', text: '共有設定の更新に失敗しました。' });
-    }
-  };
-
-  const handleJoinSharedBoard = async (e) => {
-    e.preventDefault();
-    setShareMessage({ type: '', text: '' });
-    const targetBoardId = joinBoardIdInput.trim();
-    if (!targetBoardId) return;
-    if (!user || !db) {
-      setShareMessage({ type: 'error', text: '共有ボードに参加するにはGoogleログインが必要です。' });
-      return;
-    }
-
-    try {
-      const targetMetaRef = doc(db, 'artifacts', appId, 'public', 'data', 'boards', targetBoardId);
-      const snap = await getDoc(targetMetaRef);
-      if (!snap.exists()) {
-        setShareMessage({ type: 'error', text: '指定された共有IDのボードが見つかりませんでした。' });
-        return;
-      }
-
-      const data = snap.data();
-      const userEmail = (user.email || '').toLowerCase();
-      const allowedEmails = (data.sharedWithEmails || []).map(em => em.toLowerCase());
-
-      // オーナー本人または許可リストにメールアドレスが含まれている場合アクセス許可
-      if (data.ownerId !== user.uid && !allowedEmails.includes(userEmail)) {
-        setShareMessage({ 
-          type: 'error', 
-          text: `アクセス権がありません。オーナー（${data.ownerName}）にあなたのメールアドレス（${user.email}）の追加を依頼してください。` 
-        });
-        return;
-      }
-
-      // メンバー一覧に自分を追加
-      const memberObj = {
-        uid: user.uid,
-        name: user.displayName || 'Googleユーザー',
-        email: user.email || '',
-        photoURL: user.photoURL || ''
-      };
-      const alreadyMember = (data.members || []).some(m => m.uid === user.uid);
-      if (!alreadyMember) {
-        await updateDoc(targetMetaRef, {
-          members: arrayUnion(memberObj)
-        });
-      }
-
-      // 自分の参加リストに保存
-      const newJoined = [
-        ...joinedBoards.filter(b => b.boardId !== targetBoardId),
-        { boardId: targetBoardId, ownerName: data.ownerName, ownerEmail: data.ownerEmail }
-      ];
-      setJoinedBoards(newJoined);
-
-      const userProfileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'info');
-      await setDoc(userProfileRef, { joinedBoards: newJoined }, { merge: true });
-
-      setActiveBoardId(targetBoardId);
-      setJoinBoardIdInput('');
-      setShareMessage({ type: 'success', text: `${data.ownerName}さんのボードに接続しました！` });
-    } catch (err) {
-      console.error("Join board error:", err);
-      setShareMessage({ type: 'error', text: 'ボードへの参加処理中にエラーが発生しました。' });
-    }
-  };
-
-  const handleCopyShareId = () => {
-    const idToCopy = user ? user.uid : '';
-    if (!idToCopy) return;
-    const tempInput = document.createElement('input');
-    tempInput.value = idToCopy;
-    document.body.appendChild(tempInput);
-    tempInput.select();
-    document.execCommand('copy');
-    document.body.removeChild(tempInput);
-    setShareMessage({ type: 'success', text: 'あなたの共有IDをクリップボードにコピーしました！' });
-  };
-
-  // --- 7. PWA インストール実行 ---
-  const handleInstallClick = async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
-        setDeferredPrompt(null);
-      }
-    } else {
-      setShowPwaModal(true);
-    }
-  };
-
-  // --- 週移動ハンドラ ---
-  const goToPrevWeek = () => {
-    const prev = new Date(currentSunday);
-    prev.setDate(prev.getDate() - 7);
-    setCurrentSunday(prev);
-  };
-
-  const goToNextWeek = () => {
-    const next = new Date(currentSunday);
-    next.setDate(next.getDate() + 7);
-    setCurrentSunday(next);
-  };
-
-  const goToThisWeek = () => {
-    setCurrentSunday(getSundayOfWeek(new Date()));
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-16">
-      {/* --- トップナビゲーションバー --- */}
-      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
-          {/* アプリタイトル */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-emerald-500 flex items-center justify-center text-white shadow-sm">
-              <CheckSquare className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 leading-tight">
-                週間目標＆反省
-              </h1>
-              <p className="text-[11px] text-slate-500 hidden sm:block">
-                日曜始まり・土曜締め / 週次レビュー
-              </p>
-            </div>
+      document.getElementById('app').innerHTML = `
+        <!-- ヘッダー -->
+        <header class="flex items-center justify-between mb-4">
+          <div>
+            <h1 class="text-xl font-bold text-slate-900">週間目標＆反省</h1>
+            <p class="text-xs text-slate-500">日曜始まり・土曜締め</p>
           </div>
+          <div class="flex gap-2">
+            <button onclick="toggleHelp(true)" class="px-3 py-1.5 rounded-xl text-xs font-medium bg-indigo-50 text-indigo-700 active:scale-95">ホーム追加</button>
+            <button onclick="toggleShare(true)" class="px-3 py-1.5 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700 active:scale-95">共有</button>
+          </div>
+        </header>
 
-          {/* 右側アクションボタン群 */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* ホーム画面に追加ボタン */}
-            <button
-              onClick={handleInstallClick}
-              className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 active:scale-95 transition"
-              title="スマホのホーム画面に追加"
-            >
-              <Smartphone className="w-4 h-4" />
-              <span className="hidden xs:inline">ホームに追加</span>
+        ${bannerAlert ? `
+          <div class="mb-4 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-start justify-between gap-2">
+            <div>
+              <p class="text-xs font-bold text-amber-900">${bannerAlert.title}</p>
+              <p class="text-xs text-amber-800 mt-0.5">${bannerAlert.body}</p>
+            </div>
+            <button onclick="closeBanner()" class="text-amber-600 text-sm font-bold px-1">✕</button>
+          </div>
+        ` : ''}
+
+        <!-- 週切り替え -->
+        <div class="bg-white rounded-2xl p-3 shadow-sm border border-slate-100 flex items-center justify-between mb-4">
+          <button onclick="changeWeek(-1)" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm font-bold active:scale-95">◀ 前週</button>
+          <div class="text-center">
+            <div class="text-sm font-bold text-slate-800">${formatWeekRange(currentSunday)}</div>
+            ${isThisWeek
+              ? '<span class="text-[11px] font-semibold text-indigo-600">今週</span>'
+              : '<button onclick="goToday()" class="text-[11px] text-slate-500 underline">今週に戻る</button>'
+            }
+          </div>
+          <button onclick="changeWeek(1)" class="px-3 py-1.5 rounded-xl bg-slate-100 text-sm font-bold active:scale-95">次週 ▶</button>
+        </div>
+
+        <!-- 土曜9時通知設定 -->
+        <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-100 flex items-center justify-between mb-4">
+          <div>
+            <div class="text-xs font-bold text-slate-800">土曜 9:00 未達リマインド ${state.notifyEnabled ? '<span class="text-emerald-600">ON</span>' : '<span class="text-slate-400">OFF</span>'}</div>
+            <div class="text-[11px] text-slate-500">未達がある場合、最終日(土曜)朝9時に通知</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="testNotify()" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-[11px] font-medium text-slate-700 active:scale-95">テスト</button>
+            <button onclick="toggleNotify()" class="w-12 h-7 rounded-full transition p-1 ${state.notifyEnabled ? 'bg-indigo-600' : 'bg-slate-300'}">
+              <div class="w-5 h-5 rounded-full bg-white transition transform ${state.notifyEnabled ? 'translate-x-5' : 'translate-x-0'}"></div>
             </button>
-
-            {/* 共有ボタン */}
-            <button
-              onClick={() => {
-                setShareMessage({ type: '', text: '' });
-                setShowShareModal(true);
-              }}
-              className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:scale-95 transition"
-              title="他のGoogleアカウントと共有"
-            >
-              <Share2 className="w-4 h-4" />
-              <span>共有</span>
-            </button>
-
-            {/* Googleログイン / アカウント表示 */}
-            {user ? (
-              <div className="flex items-center gap-1.5 pl-1">
-                {user.photoURL ? (
-                  <img 
-                    src={user.photoURL} 
-                    alt={user.displayName || 'User'} 
-                    className="w-8 h-8 rounded-full border border-slate-200"
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                  />
-                ) : (
-                  <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">
-                    {(user.displayName || user.email || 'U')[0].toUpperCase()}
-                  </div>
-                )}
-                <button
-                  onClick={handleLogout}
-                  className="p-2 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-slate-100 transition"
-                  title="ログアウト"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={handleGoogleLogin}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white hover:bg-slate-800 active:scale-95 transition shadow-sm"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Googleログイン</span>
-              </button>
-            )}
           </div>
         </div>
-      </header>
 
-      <main className="max-w-3xl mx-auto px-4 pt-5 space-y-5">
-        {/* 認証エラー表示 */}
-        {authError && (
-          <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl text-sm flex items-center justify-between">
-            <span>{authError}</span>
-            <button onClick={() => setAuthError('')}><X className="w-4 h-4" /></button>
+        <!-- 1週間の目標 -->
+        <section class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-base font-bold text-slate-900">1週間の目標</h2>
+            <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700">${done}/${total} 達成 (${percent}%)</span>
           </div>
-        )}
-
-        {/* --- アプリ内通知アラートバナー（土曜日9:00またはテスト発火時） --- */}
-        {inAppAlert && (
-          <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-4 rounded-2xl shadow-lg flex items-start justify-between gap-3 animate-fade-in">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-white/20 rounded-xl mt-0.5">
-                <Bell className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <div className="font-bold text-sm sm:text-base">{inAppAlert.title}</div>
-                <p className="text-xs sm:text-sm text-amber-50 mt-0.5 leading-relaxed">
-                  {inAppAlert.body}
-                </p>
-              </div>
-            </div>
-            <button 
-              onClick={() => setInAppAlert(null)}
-              className="p-1.5 hover:bg-white/20 rounded-xl transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        )}
-
-        {/* --- ワークスペース切り替えバー（ログイン時） --- */}
-        {user && (
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-3 shadow-sm flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs text-slate-600">
-              <Users className="w-4 h-4 text-indigo-600" />
-              <span className="font-medium">表示中のボード:</span>
-              <select
-                value={activeBoardId}
-                onChange={(e) => setActiveBoardId(e.target.value)}
-                className="bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value={user.uid}>自分の目標ボード ({user.displayName || user.email})</option>
-                {joinedBoards.map(b => (
-                  <option key={b.boardId} value={b.boardId}>
-                    共有: {b.ownerName}さんのボード
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              {(boardMeta.members || []).slice(0, 4).map((m, idx) => (
-                <span 
-                  key={m.uid || idx}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-indigo-50 text-indigo-700 font-medium"
-                  title={m.email}
-                >
-                  {m.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* --- 1. 週切り替えナビゲーションカード --- */}
-        <section className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <button
-              onClick={goToPrevWeek}
-              className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95 transition"
-              aria-label="前の週へ"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-
-            <div className="text-center flex-1">
-              <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full mb-1">
-                <Calendar className="w-3.5 h-3.5" />
-                <span>{isThisWeek ? '今週のスケジュール' : '週間アーカイブ'}</span>
-              </div>
-              <h2 className="text-base sm:text-xl font-bold text-slate-900 tracking-tight">
-                {formatJapaneseWeekRange(currentSunday)}
-              </h2>
-            </div>
-
-            <button
-              onClick={goToNextWeek}
-              className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95 transition"
-              aria-label="次の週へ"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
+          <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden mb-3">
+            <div class="h-full bg-indigo-600 transition-all" style="width: ${percent}%"></div>
           </div>
 
-          {!isThisWeek && (
-            <div className="mt-3 text-center">
-              <button
-                onClick={goToThisWeek}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition shadow-sm"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>今週に戻る</span>
-              </button>
-            </div>
-          )}
-        </section>
-
-        {/* --- 2. 土曜日 9:00 未達リマインド通知設定バー --- */}
-        <section className="bg-white rounded-3xl p-4 sm:px-5 border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-2xl transition ${notifyEnabled ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'}`}>
-              {notifyEnabled ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />}
-            </div>
-            <div>
-              <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>土曜日 9:00 未達リマインド</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${notifyEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                  {notifyEnabled ? 'ON' : 'OFF'}
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                未達成の目標がある場合、最終日（土曜）朝9時に通知します
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-2.5">
-            {/* テスト通知ボタン */}
-            <button
-              onClick={() => triggerSaturdayNotification(true)}
-              className="px-3 py-2 rounded-xl text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 transition"
-            >
-              今すぐ通知テスト
-            </button>
-
-            {/* トグルスイッチ */}
-            <button
-              type="button"
-              role="switch"
-              aria-checked={notifyEnabled}
-              onClick={handleToggleNotify}
-              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                notifyEnabled ? 'bg-indigo-600' : 'bg-slate-300'
-              }`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                  notifyEnabled ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
-        </section>
-
-        {/* --- 3. 1週間の目標（箇条書きリスト＆達成率） --- */}
-        <section className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-sm space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-indigo-600" />
-                <span>1週間の目標</span>
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                今週達成したいことを箇条書きでリストアップしましょう
-              </p>
-            </div>
-
-            {/* 達成率バッジ */}
-            <div className="text-right">
-              <span className="text-sm font-bold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-2xl">
-                {completedGoals} / {totalGoals} 達成 ({progressPercent}%)
-              </span>
-            </div>
-          </div>
-
-          {/* 達成率プログレスバー */}
-          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-500 rounded-full"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-
-          {/* 新規目標追加フォーム */}
-          <form onSubmit={handleAddGoal} className="flex gap-2">
-            <input
-              type="text"
-              value={newGoalText}
-              onChange={(e) => setNewGoalText(e.target.value)}
-              placeholder="新しい目標を入力（例：毎日英単語を20個覚える）"
-              className="flex-1 px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 transition"
-            />
-            <button
-              type="submit"
-              disabled={!newGoalText.trim()}
-              className="px-4 py-3 rounded-2xl bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition flex items-center gap-1.5 shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span>追加</span>
-            </button>
+          <form onsubmit="addGoal(event)" class="flex gap-2 mb-3">
+            <input id="newGoalInput" type="text" placeholder="目標を入力（例：毎日英単語20個）" class="flex-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-indigo-500" />
+            <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold active:scale-95">追加</button>
           </form>
 
-          {/* 目標リスト */}
-          {goals.length === 0 ? (
-            <div className="text-center py-8 px-4 rounded-2xl bg-slate-50 border border-dashed border-slate-200">
-              <p className="text-sm text-slate-500">まだこの週の目標が登録されていません。</p>
-              <p className="text-xs text-slate-400 mt-1">上の入力欄から最初の目標を追加してみましょう！</p>
-            </div>
-          ) : (
-            <ul className="space-y-2.5">
-              {goals.map((goal) => (
-                <li
-                  key={goal.id}
-                  className={`group flex items-center justify-between gap-3 p-3.5 rounded-2xl border transition ${
-                    goal.completed
-                      ? 'bg-emerald-50/50 border-emerald-200/70'
-                      : 'bg-white border-slate-200 hover:border-indigo-300'
-                  }`}
-                >
-                  {editingGoalId === goal.id ? (
-                    <div className="flex-1 flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={editingGoalText}
-                        onChange={(e) => setEditingGoalText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') saveEditedGoal(goal.id);
-                          if (e.key === 'Escape') setEditingGoalId(null);
-                        }}
-                        autoFocus
-                        className="flex-1 px-3 py-1.5 rounded-xl border border-indigo-400 text-sm focus:outline-none"
-                      />
-                      <button
-                        onClick={() => saveEditedGoal(goal.id)}
-                        className="p-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
-                        title="保存"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setEditingGoalId(null)}
-                        className="p-2 rounded-xl bg-slate-200 text-slate-600 hover:bg-slate-300"
-                        title="キャンセル"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleGoal(goal.id)}
-                        className="flex items-start gap-3 flex-1 text-left"
-                      >
-                        {goal.completed ? (
-                          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                        ) : (
-                          <Circle className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 shrink-0 mt-0.5 transition" />
-                        )}
-                        <span
-                          className={`text-sm sm:text-base leading-snug break-all transition ${
-                            goal.completed
-                              ? 'line-through text-slate-400'
-                              : 'text-slate-800 font-medium'
-                          }`}
-                        >
-                          {goal.text}
-                        </span>
-                      </button>
-
-                      <div className="flex items-center gap-1 shrink-0">
-                        {goal.completed && (
-                          <span className="hidden sm:inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 mr-1">
-                            達成済
-                          </span>
-                        )}
-                        <button
-                          onClick={() => startEditingGoal(goal)}
-                          className="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
-                          title="編集"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteGoal(goal.id)}
-                          className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                          title="削除"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* --- 4. 1週間の反省（3行テキストエリア） --- */}
-        <section className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900">1週間の反省・振り返り</h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                良かった点や次週への改善点を3行程度でまとめましょう
-              </p>
-            </div>
-            <span className="text-xs font-medium text-slate-400">
-              {saveStatus === 'saving' && '保存中...'}
-              {saveStatus === 'saved' && '✓ 自動保存済み'}
-              {saveStatus === 'error' && '⚠ 保存エラー'}
-            </span>
-          </div>
-
-          <textarea
-            rows={3}
-            value={reflection}
-            onChange={handleReflectionChange}
-            placeholder="例：&#10;・平日夜の読書習慣は定着してきた。&#10;・水曜日に残業で運動ができなかったので、木曜朝に振り替えるようにしたい。"
-            className="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-relaxed focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 transition resize-y"
-          />
-        </section>
-      </main>
-
-      {/* --- 共有モーダル（Googleアカウント連携） --- */}
-      {showShareModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-emerald-100 text-emerald-700">
-                  <Users className="w-5 h-5" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-900">Googleアカウントで共有</h3>
-              </div>
-              <button 
-                onClick={() => setShowShareModal(false)}
-                className="p-2 rounded-xl text-slate-400 hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {!user ? (
-              <div className="text-center py-4 space-y-4">
-                <p className="text-sm text-slate-600 leading-relaxed">
-                  他のGoogleアカウントと目標・反省をリアルタイムに共有するには、まずGoogleアカウントでログインしてください。
-                </p>
-                <button
-                  onClick={handleGoogleLogin}
-                  className="w-full py-3 px-4 rounded-2xl bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 transition flex items-center justify-center gap-2 shadow-md"
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>Googleアカウントでログイン</span>
+          <ul class="space-y-2">
+            ${data.goals.length === 0 ? '<li class="text-xs text-slate-400 text-center py-4">目標がまだありません。上の欄から追加しよう！</li>' : ''}
+            ${data.goals.map(g => `
+              <li class="flex items-center justify-between p-2.5 rounded-xl border ${g.completed ? 'bg-slate-50 border-slate-100' : 'bg-white border-slate-200'}">
+                <button onclick="toggleGoal('${g.id}')" class="flex items-center gap-2.5 flex-1 text-left">
+                  <span class="w-5 h-5 rounded-md flex items-center justify-center border ${g.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300'} text-xs font-bold">
+                    ${g.completed ? '✓' : ''}
+                  </span>
+                  <span class="text-sm ${g.completed ? 'line-through text-slate-400' : 'text-slate-800'}">${g.text}</span>
                 </button>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {shareMessage.text && (
-                  <div className={`p-3 rounded-2xl text-xs font-medium ${
-                    shareMessage.type === 'error' ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'
-                  }`}>
-                    {shareMessage.text}
-                  </div>
-                )}
+                <button onclick="deleteGoal('${g.id}')" class="text-xs text-slate-400 hover:text-rose-500 px-2 py-1">削除</button>
+              </li>
+            `).join('')}
+          </ul>
+        </section>
 
-                {/* 自分のボードを共有する */}
-                <div className="space-y-2.5">
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    1. 相手のGoogleアカウントを招待する
-                  </label>
-                  <form onSubmit={handleInviteByEmail} className="flex gap-2">
-                    <input
-                      type="email"
-                      value={shareEmailInput}
-                      onChange={(e) => setShareEmailInput(e.target.value)}
-                      placeholder="friend@gmail.com"
-                      className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <button
-                      type="submit"
-                      className="px-3.5 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition flex items-center gap-1"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                      <span>許可</span>
-                    </button>
-                  </form>
-
-                  {/* 自分の共有IDコピー */}
-                  <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 flex items-center justify-between gap-2">
-                    <div className="truncate">
-                      <div className="text-[10px] text-slate-400 font-semibold">あなたの共有ID（相手に送信）</div>
-                      <div className="text-xs font-mono text-slate-700 truncate">{user.uid}</div>
-                    </div>
-                    <button
-                      onClick={handleCopyShareId}
-                      className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-100 flex items-center gap-1 shrink-0"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>コピー</span>
-                    </button>
-                  </div>
-
-                  {/* 許可済みメールアドレス一覧 */}
-                  {(boardMeta.sharedWithEmails || []).length > 0 && (
-                    <div className="pt-1">
-                      <div className="text-[11px] text-slate-500 mb-1">アクセス許可済みアカウント:</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {boardMeta.sharedWithEmails.map(em => (
-                          <span key={em} className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-xs">
-                            {em}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <hr className="border-slate-100" />
-
-                {/* 相手のボードに参加する */}
-                <div className="space-y-2.5">
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                    2. 共有されたボードを開く（共有IDを入力）
-                  </label>
-                  <form onSubmit={handleJoinSharedBoard} className="flex gap-2">
-                    <input
-                      type="text"
-                      value={joinBoardIdInput}
-                      onChange={(e) => setJoinBoardIdInput(e.target.value)}
-                      placeholder="相手から受け取った共有ID"
-                      className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <button
-                      type="submit"
-                      className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition"
-                    >
-                      参加
-                    </button>
-                  </form>
-                </div>
-              </div>
-            )}
+        <!-- 1週間の反省（3行欄） -->
+        <section class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-base font-bold text-slate-900">1週間の反省</h2>
+            <span class="text-[11px] text-emerald-600 font-medium">✓ 自動保存</span>
           </div>
-        </div>
-      )}
+          <textarea rows="3" oninput="updateReflection(this.value)" placeholder="今週の振り返りや来週への改善点を3行程度で書こう..." class="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:outline-none focus:border-indigo-500">${data.reflection}</textarea>
+        </section>
 
-      {/* --- ホーム画面に追加（PWA）ガイドモーダル --- */}
-      {showPwaModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-indigo-100 text-indigo-600">
-                  <Download className="w-5 h-5" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-900">ホーム画面に追加する方法</h3>
-              </div>
-              <button 
-                onClick={() => setShowPwaModal(false)}
-                className="p-2 rounded-xl text-slate-400 hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
+        <!-- 共有モーダル -->
+        ${showShareModal ? `
+          <div class="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl p-5 max-w-sm w-full">
+              <h3 class="text-base font-bold mb-2">他のGoogleアカウントへ共有</h3>
+              <p class="text-xs text-slate-600 mb-4">下のボタンを押すと、今週の目標と反省が入った専用リンクが作成されます。GmailやGoogleチャット、LINE等で送ると相手の端末でも開けます。</p>
+              <button onclick="copyShareLink()" class="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold mb-2">共有リンクを送る / コピー</button>
+              <button onclick="toggleShare(false)" class="w-full py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-bold">閉じる</button>
             </div>
-
-            <div className="space-y-4 text-sm text-slate-600">
-              <p className="leading-relaxed">
-                このアプリをスマートフォンのホーム画面に追加すると、通常のアプリと同じようにフルスクリーンですぐに起動できます。
-              </p>
-
-              {/* iPhone (Safari) 手順 */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
-                <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                  <span className="px-2 py-0.5 rounded bg-slate-800 text-white text-[10px]">iPhone / iPad</span>
-                  <span>Safari をお使いの場合</span>
-                </div>
-                <ol className="list-decimal list-inside text-xs space-y-1 text-slate-600 pt-1">
-                  <li>画面下部（または右上）の<strong>「共有」アイコン（□に↑）</strong>をタップ</li>
-                  <li>メニューを下にスクロールして<strong>「ホーム画面に追加」</strong>を選択</li>
-                  <li>右上の<strong>「追加」</strong>をタップして完了！</li>
-                </ol>
-              </div>
-
-              {/* Android (Chrome) 手順 */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5">
-                <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                  <span className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px]">Android</span>
-                  <span>Chrome をお使いの場合</span>
-                </div>
-                <ol className="list-decimal list-inside text-xs space-y-1 text-slate-600 pt-1">
-                  <li>ブラウザ右上の<strong>メニュー（⋮）</strong>をタップ</li>
-                  <li><strong>「アプリをインストール」</strong>または<strong>「ホーム画面に追加」</strong>をタップ</li>
-                  <li>確認画面で<strong>「インストール」</strong>を押して完了！</li>
-                </ol>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setShowPwaModal(false)}
-              className="w-full py-3 rounded-2xl bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 transition"
-            >
-              閉じる
-            </button>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        ` : ''}
+
+        <!-- ホーム追加モーダル -->
+        ${showHelpModal ? `
+          <div class="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl p-5 max-w-sm w-full">
+              <h3 class="text-base font-bold mb-2">iPhoneホーム画面への追加方法</h3>
+              <ol class="text-xs text-slate-700 space-y-2 list-decimal pl-4 mb-4">
+                <li>Safari画面一番下の<strong>共有ボタン（四角から上矢印のマーク）</strong>をタップ</li>
+                <li>下にスクロールして<strong>「ホーム画面に追加」</strong>をタップ</li>
+                <li>右上の<strong>「追加」</strong>をタップして完了！</li>
+              </ol>
+              <button onclick="toggleHelp(false)" class="w-full py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">わかった</button>
+            </div>
+          </div>
+        ` : ''}
+      `;
+    }
+    render();
+  </script>
+</body>
+</html>
